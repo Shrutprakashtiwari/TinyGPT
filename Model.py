@@ -6,17 +6,17 @@ import math
 with open("1661-0.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-chars=list(set(text.split()))
+chars=sorted(set(list(text)))
 # print(char)
 # chars=enumerate(char)
 length=len(chars)
 print(length)
-stoi={word : i for i,word in enumerate(chars)}
+stoi={char : i for i,char in enumerate(chars)}
 # print(stoi)
-itos={i : word for word,i in stoi.items()}
+itos={i : char for char,i in stoi.items()}
 # print(itos)
 # data = torch.tensor(encode(text), dtype=torch.long)
-encode = lambda s: [stoi[word] for word in s.split()]
+encode = lambda s: [stoi[char] for char in list(s)]
 decode = lambda l: ''.join([itos[i] for i in l])
 
 data = torch.tensor(encode(text), dtype=torch.long)
@@ -113,7 +113,7 @@ class GPT(nn.Module):
                   embed_dim,
                   block_size,
                   num_heads,
-                  
+
 
                   ):
         super().__init__()
