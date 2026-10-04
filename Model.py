@@ -41,24 +41,31 @@ class SelfAttention(nn.Module):
         self.headsize = headsize
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, x):
+    def forward(self, x, k_cache=None, v_cache=None):
         B, T, _ = x.shape
 
         qkv = self.qkv(x)
-        q, k, v = qkv.split(self.headsize, dim=-1)
-    
+        q, k_new, v_new = qkv.split(self.headsize, dim=-1)
+
+        if k_cache is not None and v_cache is not None:
+            k=torch.cat([k_cache, k_new], dim=1)
+            v=torch.cat([v_cache, v_new], dim=1)
+        else:
+            k = k_new
+            v = v_new
+        T_k=k.size(1)
         w = q @ k.transpose(-2, -1)
         w = w / math.sqrt(self.headsize)
+        if k_cache is None or T>1:
+            mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
+            mask = ~mask
 
-        mask = torch.tril(torch.ones(T, T, device=x.device)).bool()
-        mask = ~mask
-
-        w = w.masked_fill(mask, float('-inf'))
+            w = w.masked_fill(mask, float('-inf'))
         w = w.softmax(dim=-1)
         w = self.dropout(w)
 
         out = w @ v
-        return out
+        return out,k,v
 class MultiHeadAttention(nn.Module):
     def __init__(self, headsize, embed_size, num_heads):
         super().__init__()
@@ -68,9 +75,23 @@ class MultiHeadAttention(nn.Module):
         ])
         self.proj=nn.Linear(num_heads*headsize, embed_size)
         self.dropout = nn.Dropout(0.1)
-    def forward(self, x):
-        res=torch.cat([h(x) for h in self.heads], dim=-1)
-        return self.dropout(self.proj(res))
+    def forward(self, x, k_cache=None, v_cache=None):
+        k_cache_new=[]
+        v_cache_new=[]
+        out_heads=[]
+        for i,head in enumerate(self.heads):
+            if k_cache is not None and v_cache is not None:
+                k_c=k_cache[i]
+                v_c=v_cache[i]
+            else:
+                k_c=None
+                v_c=None
+            out,k,v=head(x,k_c,v_c)
+            out_heads.append(out)
+            k_cache_new.append(k)
+            v_cache_new.append(v)
+        res=torch.cat(out_heads, dim=-1)
+        return self.dropout(self.proj(res)),k_cache_new,v_cache_new
 class FeedForward(nn.Module):
     def __init__(self,embed_size):
         super().__init__()
@@ -100,46 +121,60 @@ class GPT(nn.Module):
         super().__init__()
 
         self.position = nn.Embedding(block_size, embed_size)
+        self.embed = nn.Embedding(vocab_size, embed_size)
 
-        self.trans = nn.Sequential(*[
+
+        self.trans = nn.ModuleList([
             TransformerBlock(embed_size, num_heads)
             for _ in range(num_layers)
         ])
 
         self.ln3 = nn.LayerNorm(embed_size)
+        self.logits = nn.Linear(embed_size, vocab_size)
         self.logits.weight = self.embed.weight
         self.block_size = block_size
 
-    def forward(self, x):
+    def forward(self, x,k_cache=None,v_cache=None):
+        new_k_cache=[]
+        new_v_cache=[]
+
         B, T = x.shape
 
         tok = self.embed(x)
-        pos = self.position(torch.arange(T, device=x.device)).unsqueeze(0)
+        pos_offset = 0 if k_cache is None else k_cache[0][0].size(1)
+        pos = self.position(torch.arange(pos_offset, pos_offset + T, device=x.device)).unsqueeze(0)
 
         x = tok + pos
-        x = self.trans(x)
+        for i, block in enumerate(self.trans):
+            k_c = k_cache[i] if k_cache is not None else None
+            v_c = v_cache[i] if v_cache is not None else None
+            x, k, v = block(x, k_c, v_c)
+            new_k_cache.append(k)
+            new_v_cache.append(v)
         x = self.ln3(x)
         x = self.logits(x)
+        logits=self.logits(x)
 
-        return x
+        return logits, new_k_cache, new_v_cache
     def generate(self, idx, max_new_tokens, temperature=1.0):
         self.eval()
-        
+
+        k_cache = None
+        v_cache = None
+
         for _ in range(max_new_tokens):
-            idx_cond = idx[:, -self.block_size:]
-            
+
+            if k_cache is None:
+                idx_cond = idx
+            else:
+                idx_cond = idx[:, -1:]
+
             with torch.no_grad():
-                logits = self(idx_cond)
-            
+                logits, k_cache, v_cache = self(idx_cond, k_cache, v_cache)
+
             logits = logits[:, -1, :]
             probs = F.softmax(logits / temperature, dim=-1)
-            
-            # probs = F.softmax(logits / temperature, dim=-1)
-
-            probs = F.softmax(logits / temperature, dim=-1)
-
             sorted_probs, sorted_indices = torch.sort(probs, descending=True)
-
             cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
 
             mask = cumulative_probs > 0.9
@@ -151,8 +186,9 @@ class GPT(nn.Module):
 
             idx_next = torch.multinomial(sorted_probs, num_samples=1)
             idx_next = torch.gather(sorted_indices, -1, idx_next)
+
             idx = torch.cat((idx, idx_next), dim=1)
-        
+
         return idx
 
 
