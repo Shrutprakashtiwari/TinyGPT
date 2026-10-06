@@ -58,7 +58,27 @@ class SelfAttention(nn.Module):
             k = k_new
             v = v_new
         T_k=k.size(1)
-        w = q @ k.transpose(-2, -1)
+        freq = 1 / (10000 ** (torch.arange(0, self.headsize, 2, device=x.device) / self.headsize))
+        q_positions=torch.arange(T, device=x.device)
+        k_positions=torch.arange(T_k, device=x.device)
+        q_theeta=q_positions[:, None] * freq[None, :]
+        k_theeta=k_positions[:, None] * freq[None, :]
+        q_cos=torch.cos(q_theeta)
+        q_sin=torch.sin(q_theeta)
+        k_cos=torch.cos(k_theeta)
+        k_sin=torch.sin(k_theeta)
+        q_even = q[:, :, ::2]
+        q_odd  = q[:, :, 1::2]
+
+        q_rot_even = q_even * q_cos - q_odd * q_sin
+        q_rot_odd  = q_even * q_sin + q_odd * q_cos
+        k_even = k[:, :, ::2]
+        k_odd  = k[:, :, 1::2]
+        k_rot_even = k_even * k_cos - k_odd * k_sin
+        k_rot_odd  = k_even * k_sin + k_odd * k_cos
+        q_rot=torch.stack([q_rot_even, q_rot_odd], dim=-1).reshape(B, T, self.headsize)
+        k_rot=torch.stack([k_rot_even, k_rot_odd], dim=-1).reshape(B, T_k, self.headsize)
+        w = q_rot @ k_rot.transpose(-2, -1)
         w = w / math.sqrt(self.headsize)
         if k_cache is None or T>1:
             mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
@@ -127,6 +147,7 @@ class GPT(nn.Module):
 
         self.position = nn.Embedding(block_size, embed_size)
         self.embed = nn.Embedding(vocab_size, embed_size)
+        nn.init.normal_(self.embed.weight, mean=0.0, std=0.02)
 
 
         self.trans = nn.ModuleList([
@@ -136,6 +157,7 @@ class GPT(nn.Module):
 
         self.ln3 = nn.LayerNorm(embed_size)
         self.logits = nn.Linear(embed_size, vocab_size)
+        print(self.embed.weight.std().item())
         self.logits.weight = self.embed.weight
         self.block_size = block_size
 
@@ -178,8 +200,12 @@ class GPT(nn.Module):
             if k_cache is None:
                 idx_cond = idx
             else:
-                idx_cond = idx[:, -1:]
-
+                if k_cache[0][0].size(1) >= self.block_size:
+                    k_cache=None
+                    v_cache=None
+                    idx_cond = idx[:, -self.block_size:]
+                else:
+                    idx_cond = idx[:, -1:]
             with torch.no_grad():
                 logits, k_cache, v_cache = self(idx_cond, k_cache, v_cache)
 
@@ -222,6 +248,7 @@ for step in range(10000):
     x, y = get_batch()
 
     logits,_,_ = model(x)
+    # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
 
     loss = F.cross_entropy(
     logits.view(-1, vocab_size),
