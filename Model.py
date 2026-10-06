@@ -35,10 +35,11 @@ def get_batch():
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, embed_size, headsize):
+    def __init__(self, embed_size, headsize,block_size):
         super().__init__()
         self.qkv = nn.Linear(embed_size, 3 * headsize)
         self.headsize = headsize
+        self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, x, k_cache=None, v_cache=None):
@@ -50,6 +51,9 @@ class SelfAttention(nn.Module):
         if k_cache is not None and v_cache is not None:
             k=torch.cat([k_cache, k_new], dim=1)
             v=torch.cat([v_cache, v_new], dim=1)
+            if k.size(1)>self.block_size:
+                k=k[:,-self.block_size:,:]
+                v=v[:,-self.block_size:,:]
         else:
             k = k_new
             v = v_new
@@ -67,10 +71,10 @@ class SelfAttention(nn.Module):
         out = w @ v
         return out,k,v
 class MultiHeadAttention(nn.Module):
-    def __init__(self, headsize, embed_size, num_heads):
+    def __init__(self, headsize, embed_size, num_heads, block_size):
         super().__init__()
         self.heads = nn.ModuleList([
-            SelfAttention(embed_size, headsize)
+            SelfAttention(embed_size, headsize, block_size)
             for _ in range(num_heads)
         ])
         self.proj=nn.Linear(num_heads*headsize, embed_size)
@@ -106,16 +110,17 @@ class FeedForward(nn.Module):
         x=self.dropout(x)
         return x
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_size, num_heads):
+    def __init__(self, embed_size, num_heads, block_size):
         super().__init__()
-        self.ma = MultiHeadAttention(embed_size // num_heads, embed_size, num_heads)
+        self.ma = MultiHeadAttention(embed_size // num_heads, embed_size, num_heads, block_size)
         self.ln1=nn.LayerNorm(embed_size)
         self.ff=FeedForward(embed_size)
         self.ln2=nn.LayerNorm(embed_size)
-    def forward(self, x):
-        x=x+self.ma(self.ln1(x))
+    def forward(self, x, k_cache=None, v_cache=None):
+        attn_out, k, v = self.ma(self.ln1(x), k_cache, v_cache)
+        x=x+attn_out
         x=x+self.ff(self.ln2(x))
-        return x
+        return x, k, v
 class GPT(nn.Module):
     def __init__(self, vocab_size, embed_size, num_heads, block_size, num_layers):
         super().__init__()
@@ -125,7 +130,7 @@ class GPT(nn.Module):
 
 
         self.trans = nn.ModuleList([
-            TransformerBlock(embed_size, num_heads)
+            TransformerBlock(embed_size, num_heads, block_size)
             for _ in range(num_layers)
         ])
 
@@ -141,9 +146,15 @@ class GPT(nn.Module):
         B, T = x.shape
 
         tok = self.embed(x)
-        pos_offset = 0 if k_cache is None else k_cache[0][0].size(1)
-        pos = self.position(torch.arange(pos_offset, pos_offset + T, device=x.device)).unsqueeze(0)
+        pos_offset = 0 if k_cache is None else k_cache[0][0].size(1) % self.block_size
 
+        pos = self.position(
+            torch.arange(
+                pos_offset,
+                pos_offset + T,
+                device=x.device
+            )
+        ).unsqueeze(0)
         x = tok + pos
         for i, block in enumerate(self.trans):
             k_c = k_cache[i] if k_cache is not None else None
@@ -152,7 +163,7 @@ class GPT(nn.Module):
             new_k_cache.append(k)
             new_v_cache.append(v)
         x = self.ln3(x)
-        x = self.logits(x)
+        # x = self.logits(x)
         logits=self.logits(x)
 
         return logits, new_k_cache, new_v_cache
@@ -210,7 +221,7 @@ for step in range(10000):
 
     x, y = get_batch()
 
-    logits = model(x)
+    logits,_,_ = model(x)
 
     loss = F.cross_entropy(
     logits.view(-1, vocab_size),
