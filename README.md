@@ -163,3 +163,4 @@ I added top p instead of top k
 I merged k,q,v into one layer
 I added checkpoint that saves the current progress
 Added KV caching
+Added cache cropping
