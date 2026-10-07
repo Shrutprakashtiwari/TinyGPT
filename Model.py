@@ -58,9 +58,13 @@ class SelfAttention(nn.Module):
             k = k_new
             v = v_new
         T_k=k.size(1)
+        if k_cache is None:
+            q_start = 0
+        else:
+            q_start = k_cache.size(1)
         freq = 1 / (10000 ** (torch.arange(0, self.headsize, 2, device=x.device) / self.headsize))
-        q_positions=torch.arange(T, device=x.device)
-        k_positions=torch.arange(T_k, device=x.device)
+        q_positions=torch.arange(q_start, q_start + T, device=x.device)
+        k_positions=torch.arange(0,T_k, device=x.device)
         q_theeta=q_positions[:, None] * freq[None, :]
         k_theeta=k_positions[:, None] * freq[None, :]
         q_cos=torch.cos(q_theeta)
@@ -144,8 +148,6 @@ class TransformerBlock(nn.Module):
 class GPT(nn.Module):
     def __init__(self, vocab_size, embed_size, num_heads, block_size, num_layers):
         super().__init__()
-
-        self.position = nn.Embedding(block_size, embed_size)
         self.embed = nn.Embedding(vocab_size, embed_size)
         nn.init.normal_(self.embed.weight, mean=0.0, std=0.02)
 
@@ -167,17 +169,7 @@ class GPT(nn.Module):
 
         B, T = x.shape
 
-        tok = self.embed(x)
-        pos_offset = 0 if k_cache is None else k_cache[0][0].size(1) % self.block_size
-
-        pos = self.position(
-            torch.arange(
-                pos_offset,
-                pos_offset + T,
-                device=x.device
-            )
-        ).unsqueeze(0)
-        x = tok + pos
+        x=self.embed(x)
         for i, block in enumerate(self.trans):
             k_c = k_cache[i] if k_cache is not None else None
             v_c = v_cache[i] if v_cache is not None else None
