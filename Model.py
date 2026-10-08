@@ -32,8 +32,16 @@ def get_batch():
     x = torch.stack([data[i:i + block_size] for i in ix])
     y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
     return x, y
-
-
+class RMSNorm(nn.Module):
+    def __init__(self,embed_size, eps=1e-8):
+        super().__init__()
+        self.eps=eps
+        self.scale=nn.Parameter(torch.ones(embed_size))
+    def forward(self,x):
+        mean_sq=x.pow(2).mean(dim=-1, keepdim=True)
+        rms=torch.sqrt(mean_sq+self.eps)
+        x_norm=x/rms
+        return self.scale * x_norm
 class SelfAttention(nn.Module):
     def __init__(self, embed_size, headsize,block_size):
         super().__init__()
@@ -129,23 +137,24 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self,embed_size):
         super().__init__()
-        self.l1=nn.Linear(embed_size, 4*embed_size)
-        self.gelu=nn.GELU()
-        self.l2=nn.Linear(4*embed_size, embed_size)
+        self.gate=nn.Linear(embed_size, 4*embed_size)
+        self.up=nn.Linear(embed_size, 4*embed_size)
+        self.down=nn.Linear(4*embed_size, embed_size)
         self.dropout=nn.Dropout(0.1)
     def forward(self, x):
-        x=self.l1(x)
-        x=self.gelu(x)
-        x=self.l2(x)
+        gate=self.gate(x)
+        up=self.up(x)
+        x=F.silu(gate)*up
+        x=self.down(x)
         x=self.dropout(x)
         return x
 class TransformerBlock(nn.Module):
     def __init__(self, embed_size, num_heads, block_size):
         super().__init__()
         self.ma = MultiHeadAttention(embed_size // num_heads, embed_size, num_heads, block_size)
-        self.ln1=nn.LayerNorm(embed_size)
+        self.ln1=RMSNorm(embed_size)
         self.ff=FeedForward(embed_size)
-        self.ln2=nn.LayerNorm(embed_size)
+        self.ln2=RMSNorm(embed_size)
     def forward(self, x, k_cache=None, v_cache=None):
         attn_out, k, v = self.ma(self.ln1(x), k_cache, v_cache)
         x=x+attn_out
@@ -163,7 +172,7 @@ class GPT(nn.Module):
             for _ in range(num_layers)
         ])
 
-        self.ln3 = nn.LayerNorm(embed_size)
+        self.ln3 = RMSNorm(embed_size)
         self.logits = nn.Linear(embed_size, vocab_size)
         print(self.embed.weight.std().item())
         self.logits.weight = self.embed.weight
@@ -235,7 +244,7 @@ model = GPT(
     num_heads=num_heads,
     num_layers=4
     )
-x = torch.randint(0, vocab_size, (2, 8))
+# x = torch.randint(0, vocab_size, (2, 8))
 
 # logits, k_cache, v_cache = model(x)
 
@@ -253,13 +262,27 @@ x = torch.randint(0, vocab_size, (2, 8))
 # print("cached logits:", logits2.shape)
 # print("cached K:", k_cache2[0][0].shape)
 # print("cached V:", v_cache2[0][0].shape)
-optimizer = torch.optim.Adam(
+# x = torch.randn(2, 8, embed_size)
+# out = FeedForward(embed_size)(x)
+
+# print(out.shape)
+optimizer = torch.optim.AdamW(
     model.parameters(),
     lr=3e-4
 )
-
-for step in range(10000):
-
+warmup_steps = 500
+max_lr = 3e-4
+min_lr = 3e-5
+max_steps = 10000
+for step in range(max_steps):
+    if step<warmup_steps:
+        lr=max_lr*step/warmup_steps
+    else:
+        progress=(step-warmup_steps)/(max_steps-warmup_steps)
+        decay_factor=0.5*(1+math.cos(math.pi*progress))
+        lr=min_lr+(max_lr-min_lr)*decay_factor
+    for param_group in optimizer.param_groups:
+        param_group['lr']=lr
     x, y = get_batch()
 
     logits,_,_ = model(x)
