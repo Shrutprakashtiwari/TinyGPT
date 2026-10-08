@@ -63,8 +63,14 @@ class SelfAttention(nn.Module):
         else:
             q_start = k_cache.size(1)
         freq = 1 / (10000 ** (torch.arange(0, self.headsize, 2, device=x.device) / self.headsize))
+        if k_cache is None:
+            q_start=0
+        else:
+            q_start=k_cache.size(1)
         q_positions=torch.arange(q_start, q_start + T, device=x.device)
         k_positions=torch.arange(0,T_k, device=x.device)
+        # print("q_positions:", q_positions)
+        # print("k_positions:", k_positions)
         q_theeta=q_positions[:, None] * freq[None, :]
         k_theeta=k_positions[:, None] * freq[None, :]
         q_cos=torch.cos(q_theeta)
@@ -84,7 +90,7 @@ class SelfAttention(nn.Module):
         k_rot=torch.stack([k_rot_even, k_rot_odd], dim=-1).reshape(B, T_k, self.headsize)
         w = q_rot @ k_rot.transpose(-2, -1)
         w = w / math.sqrt(self.headsize)
-        if k_cache is None or T>1:
+        if k_cache is None:
             mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
             mask = ~mask
 
@@ -229,7 +235,24 @@ model = GPT(
     num_heads=num_heads,
     num_layers=4
     )
+x = torch.randint(0, vocab_size, (2, 8))
 
+# logits, k_cache, v_cache = model(x)
+
+# print("logits:", logits.shape)
+# print("K:", k_cache[0][0].shape)
+# print("V:", v_cache[0][0].shape)
+# x_next = torch.randint(0, vocab_size, (2, 1))
+
+# logits2, k_cache2, v_cache2 = model(
+#     x_next,
+#     k_cache,
+#     v_cache
+# )
+
+# print("cached logits:", logits2.shape)
+# print("cached K:", k_cache2[0][0].shape)
+# print("cached V:", v_cache2[0][0].shape)
 optimizer = torch.optim.Adam(
     model.parameters(),
     lr=3e-4
