@@ -166,3 +166,4 @@ Added KV caching
 Added cache cropping
 Started adding RoPE
 Improved future error that could be due to unequal shape handling
+Added RMSNorm
