@@ -294,6 +294,9 @@ warmup_steps = 500
 max_lr = 3e-4
 min_lr = 3e-5
 max_steps = 10000
+best_val_loss = float("inf")
+patience = 4
+patience_counter = 0
 for step in range(max_steps):
     if step<warmup_steps:
         lr=max_lr*step/warmup_steps
@@ -326,10 +329,24 @@ for step in range(max_steps):
             "train:", losses["train"],
             "val:", losses["val"]
         )
+        if losses["val"] < best_val_loss:
+            best_val_loss = losses["val"]
+            torch.save(model.state_dict(), "gpt_best.pth")
+            print("Best model saved with val loss:", best_val_loss)
+            patience_counter = 0
+        else:
+            patience_counter+=1
+        if patience_counter>=patience:
+            print("Early stopping triggered. No improvement in validation loss for", patience, "evaluations.")
+            break
+
+
 start = "Hello"
 idx = torch.tensor([encode(start)], dtype=torch.long)
+model.load_state_dict(
+    torch.load("gpt_best.pth", map_location="cpu")
+)
 
+model.eval()
 out = model.generate(idx, 100,temperature=0.7)
 print(decode(out[0].tolist()))
-torch.save(model.state_dict(), "gpt.pth")
-model.load_state_dict(torch.load("gpt.pth"))
