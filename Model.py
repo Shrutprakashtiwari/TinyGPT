@@ -20,6 +20,8 @@ encode = lambda s: enc.encode(s)
 decode = lambda l: enc.decode(l)
 
 data = torch.tensor(encode(text), dtype=torch.long)
+train_data = data[:int(0.9 * len(data))]
+val_data = data[int(0.9 * len(data)):]
 
 batch_size = 32
 block_size = 64
@@ -27,11 +29,29 @@ embed_size = 128
 num_heads = 4
 head_size = embed_size // num_heads
 
-def get_batch():
+def get_batch(split):
+    if split == 'train':
+        data = train_data
+    else:
+        data = val_data
     ix = torch.randint(0, len(data) - block_size - 1, (batch_size,))
     x = torch.stack([data[i:i + block_size] for i in ix])
     y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
     return x, y
+
+@torch.no_grad()
+def estimate_loss():
+    model.eval()
+    out={"train":0.0, "val":0.0}
+    for split in ["train", "val"]:
+        for k in range(100):
+            x,y=get_batch(split)
+            logits,_,_ = model(x)
+            loss=F.cross_entropy(logits.view(-1, vocab_size), y.view(-1))
+            out[split]+=loss.item()
+        out[split]/=100
+    model.train()
+    return out
 class RMSNorm(nn.Module):
     def __init__(self,embed_size, eps=1e-8):
         super().__init__()
@@ -283,7 +303,7 @@ for step in range(max_steps):
         lr=min_lr+(max_lr-min_lr)*decay_factor
     for param_group in optimizer.param_groups:
         param_group['lr']=lr
-    x, y = get_batch()
+    x, y = get_batch(split='train')
 
     logits,_,_ = model(x)
     # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
@@ -299,8 +319,13 @@ for step in range(max_steps):
 
     optimizer.step()
 
-    if step % 100 == 0:
-        print(step, loss.item())
+    if step % 500 == 0:
+        losses = estimate_loss()
+        print(
+            step,
+            "train:", losses["train"],
+            "val:", losses["val"]
+        )
 start = "Hello"
 idx = torch.tensor([encode(start)], dtype=torch.long)
 
