@@ -316,7 +316,7 @@ for step in range(max_steps):
     optimizer.zero_grad()
 
     loss.backward()
-
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     optimizer.step()
 
     if step % 500 == 0:
