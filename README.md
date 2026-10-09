@@ -165,6 +165,7 @@ I added checkpoint that saves the current progress
 Added KV caching
 Added cache cropping
 Started adding RoPE
+Added Gradient Clipping
 Improved future error that could be due to unequal shape handling
 Added RMSNorm
 Added SwiGLU
