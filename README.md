@@ -174,3 +174,4 @@ Added Train/Validation split (90/10)
 Added early stoppage and checkpoint
 Verified train val
 Added best model checkpoint
+Added and implemented gradient checkpoint 
