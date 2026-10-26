@@ -9,9 +9,21 @@ from torch.nn import functional as F
 import torch
 import tiktoken
 import requests
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import os
 
-url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-text = requests.get(url).text
+# use_bf16 = (
+#     device.type == "cuda"
+#     and torch.cuda.is_bf16_supported()
+# )
+
+# print("Device:", device)
+# print("Using BF16:", use_bf16)
+
+# url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+# text = requests.get(url).text
+with open("input.txt", "r", encoding="utf-8") as f:
+    text = f.read()
 
 enc = tiktoken.get_encoding("gpt2")
 vocab_size = enc.n_vocab
@@ -194,7 +206,7 @@ class GPT(nn.Module):
 
         self.ln3 = RMSNorm(embed_size)
         self.logits = nn.Linear(embed_size, vocab_size)
-        print(self.embed.weight.std().item())
+        # print(self.embed.weight.std().item())
         self.logits.weight = self.embed.weight
         self.block_size = block_size
 
@@ -290,14 +302,32 @@ optimizer = torch.optim.AdamW(
     model.parameters(),
     lr=3e-4
 )
+if os.path.exists("gpt_checkpoint.pth"):
+    checkpoint = torch.load(
+        "gpt_checkpoint.pth",
+        map_location="cpu"
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    best_val_loss = checkpoint["best_val_loss"]
+    patience_counter = checkpoint["patience_counter"]
+    checkpoint = torch.load("gpt_checkpoint.pth", map_location=device)
+
+
+    print("Training checkpoint loaded successfully!")
+    print("Saved step:", checkpoint["step"])
+else:
+    checkpoint = None
+    best_val_loss = float("inf")
+    patience_counter = 0
+    start_step = 0
+
 warmup_steps = 500
 max_lr = 3e-4
 min_lr = 3e-5
 max_steps = 10000
-best_val_loss = float("inf")
 patience = 4
-patience_counter = 0
-for step in range(max_steps):
+for step in range(start_step,  max_steps):
     if step<warmup_steps:
         lr=max_lr*step/warmup_steps
     else:
@@ -307,13 +337,18 @@ for step in range(max_steps):
     for param_group in optimizer.param_groups:
         param_group['lr']=lr
     x, y = get_batch(split='train')
+    with torch.autocast(
+    device_type="cpu",
+    dtype=torch.bfloat16,
+    enabled=True
+):
 
-    logits,_,_ = model(x)
-    # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
+        logits,_,_ = model(x)
+        # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
 
-    loss = F.cross_entropy(
-    logits.view(-1, vocab_size),
-    y.view(-1)
+        loss = F.cross_entropy(
+        logits.reshape(-1, vocab_size),
+        y.reshape(-1)
 )
 
     optimizer.zero_grad()
@@ -324,6 +359,7 @@ for step in range(max_steps):
 
     if step % 500 == 0:
         losses = estimate_loss()
+
         print(
             step,
             "train:", losses["train"],
@@ -336,6 +372,18 @@ for step in range(max_steps):
             patience_counter = 0
         else:
             patience_counter+=1
+        
+        torch.save({
+            "step": step,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "best_val_loss": best_val_loss,
+            "patience_counter": patience_counter,
+        }, "gpt_checkpoint.pth")
+        import os
+
+        print("Best model exists:", os.path.exists("gpt_best.pth"))
+        print("Training checkpoint exists:", os.path.exists("gpt_checkpoint.pth"))
         if patience_counter>=patience:
             print("Early stopping triggered. No improvement in validation loss for", patience, "evaluations.")
             break
