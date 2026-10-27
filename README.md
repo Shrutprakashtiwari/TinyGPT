@@ -177,3 +177,4 @@ Added best model checkpoint
 Added and implemented gradient checkpoint 
 Added BF16 to reduce memory usage and faster computations
 Saved current progress and now I can resume it from that point whenever I want
+Added SFT 
