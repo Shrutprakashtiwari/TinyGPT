@@ -1,7 +1,7 @@
 import json
 import tiktoken
 import torch
-with open("conversations.json",encoding="utf-8") as f:
+with open("dolly_conversations.json",encoding="utf-8") as f:
     conversations = json.load(f)
 # print(conversations)
 block_size=64
@@ -18,7 +18,7 @@ for item in conversations:
         answer=f"{item['assistant']}\n"
 
         prompt_tokens = enc.encode(prompt)
-        answer_tokens = enc.encode(answer)
+        answer_tokens = enc.encode(answer)+[enc.eot_token]
         tokens=prompt_tokens + answer_tokens
         target=[IGNORE_INDEX]*len(prompt_tokens) + answer_tokens
         tokens=tokens[:block_size]
@@ -31,3 +31,9 @@ for item in conversations:
 
 input_ids = torch.tensor(input_ids, dtype=torch.long)
 labels = torch.tensor(labels, dtype=torch.long)
+
+# for i, item in enumerate(conversations):
+#     if "python" in item["user"].lower():
+#         print("USER:", item["user"])
+#         print("EXPECTED:", item["assistant"])
+#         print("TRAINED TOKENS:", (labels[i] != -100).sum().item())
