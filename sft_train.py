@@ -6,6 +6,12 @@ from model import GPT, vocab_size, embed_size, num_heads, block_size
 
 device = torch.device("cpu")
 enc = tiktoken.get_encoding("gpt2")
+@torch.no_grad()
+def estimate(loss):
+    model.eval()
+    out={"train":0.0, "val":0.0}
+    
+
 
 model = GPT(
     vocab_size=vocab_size,
@@ -28,7 +34,7 @@ labels = labels.to(device)
 
 optimizer = torch.optim.AdamW(
     model.parameters(),
-    lr=1e-5
+    lr=1e-4
 )
 
 model.train()
