@@ -47,8 +47,8 @@ while True:
     with torch.no_grad():
         output = model.generate(
             input_ids,
-            max_new_tokens=40,
-            temperature=0.8
+            max_new_tokens=20,
+            temperature=0.6
         )
 
     # Decode only the newly generated tokens
