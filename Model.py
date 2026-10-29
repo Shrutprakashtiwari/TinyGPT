@@ -52,7 +52,7 @@ def get_batch(split):
     return x, y
 
 @torch.no_grad()
-def estimate_loss():
+def estimate_loss(model,get_batch, vocab_size):
     model.eval()
     out={"train":0.0, "val":0.0}
     for split in ["train", "val"]:
@@ -298,103 +298,104 @@ model = GPT(
 # out = FeedForward(embed_size)(x)
 
 # print(out.shape)
-optimizer = torch.optim.AdamW(
-    model.parameters(),
-    lr=3e-4
-)
-if os.path.exists("gpt_checkpoint.pth"):
-    checkpoint = torch.load(
-        "gpt_checkpoint.pth",
-        map_location="cpu"
+if __name__ == "__main__":
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=3e-4
     )
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    best_val_loss = checkpoint["best_val_loss"]
-    patience_counter = checkpoint["patience_counter"]
-    checkpoint = torch.load("gpt_checkpoint.pth", map_location=device)
+    if os.path.exists("gpt_checkpoint.pth"):
+        checkpoint = torch.load(
+            "gpt_checkpoint.pth",
+            map_location="cpu"
+        )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        best_val_loss = checkpoint["best_val_loss"]
+        patience_counter = checkpoint["patience_counter"]
+        checkpoint = torch.load("gpt_checkpoint.pth", map_location=device)
+        start_step = checkpoint["step"] + 1
 
-
-    print("Training checkpoint loaded successfully!")
-    print("Saved step:", checkpoint["step"])
-else:
-    checkpoint = None
-    best_val_loss = float("inf")
-    patience_counter = 0
-    start_step = 0
-
-warmup_steps = 500
-max_lr = 3e-4
-min_lr = 3e-5
-max_steps = 10000
-patience = 4
-for step in range(start_step,  max_steps):
-    if step<warmup_steps:
-        lr=max_lr*step/warmup_steps
+        print("Training checkpoint loaded successfully!")
+        print("Saved step:", checkpoint["step"])
     else:
-        progress=(step-warmup_steps)/(max_steps-warmup_steps)
-        decay_factor=0.5*(1+math.cos(math.pi*progress))
-        lr=min_lr+(max_lr-min_lr)*decay_factor
-    for param_group in optimizer.param_groups:
-        param_group['lr']=lr
-    x, y = get_batch(split='train')
-    with torch.autocast(
-    device_type="cpu",
-    dtype=torch.bfloat16,
-    enabled=True
-):
+        checkpoint = None
+        best_val_loss = float("inf")
+        patience_counter = 0
+        start_step = 0
+
+    warmup_steps = 500
+    max_lr = 3e-4
+    min_lr = 3e-5
+    max_steps = 10000
+    patience = 4
+    for step in range(start_step,  max_steps):
+        if step<warmup_steps:
+            lr=max_lr*step/warmup_steps
+        else:
+            progress=(step-warmup_steps)/(max_steps-warmup_steps)
+            decay_factor=0.5*(1+math.cos(math.pi*progress))
+            lr=min_lr+(max_lr-min_lr)*decay_factor
+        for param_group in optimizer.param_groups:
+            param_group['lr']=lr
+        x, y = get_batch(split='train')
+    #     with torch.autocast(
+    #     device_type="cpu",
+    #     dtype=torch.bfloat16,
+    #     enabled=True
+    # ):
 
         logits,_,_ = model(x)
-        # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
+            # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
 
         loss = F.cross_entropy(
         logits.reshape(-1, vocab_size),
         y.reshape(-1)
-)
+    )
 
-    optimizer.zero_grad()
+        optimizer.zero_grad()
 
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    optimizer.step()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
 
-    if step % 500 == 0:
-        losses = estimate_loss()
+        if step % 100 == 0:
+            losses = estimate_loss()
 
-        print(
-            step,
-            "train:", losses["train"],
-            "val:", losses["val"]
-        )
-        if losses["val"] < best_val_loss:
-            best_val_loss = losses["val"]
-            torch.save(model.state_dict(), "gpt_best.pth")
-            print("Best model saved with val loss:", best_val_loss)
-            patience_counter = 0
-        else:
-            patience_counter+=1
-        
-        torch.save({
-            "step": step,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "best_val_loss": best_val_loss,
-            "patience_counter": patience_counter,
-        }, "gpt_checkpoint.pth")
-        import os
+            print(
+                step,
+                "train:", losses["train"],
+                "val:", losses["val"]
+            )
+            if losses["val"] < best_val_loss:
+                best_val_loss = losses["val"]
+                torch.save(model.state_dict(), "gpt_best.pth")
+                print("Best model saved with val loss:", best_val_loss)
+                patience_counter = 0
+            else:
+                patience_counter+=1
+            
+            torch.save({
+                "step": step,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "best_val_loss": best_val_loss,
+                "patience_counter": patience_counter,
+            }, "gpt_checkpoint.pth")
+            import os
 
-        print("Best model exists:", os.path.exists("gpt_best.pth"))
-        print("Training checkpoint exists:", os.path.exists("gpt_checkpoint.pth"))
-        if patience_counter>=patience:
-            print("Early stopping triggered. No improvement in validation loss for", patience, "evaluations.")
-            break
+            print("Best model exists:", os.path.exists("gpt_best.pth"))
+            print("Training checkpoint exists:", os.path.exists("gpt_checkpoint.pth"))
+            if patience_counter>=patience:
+                print("Early stopping triggered. No improvement in validation loss for", patience, "evaluations.")
+                break
 
 
-start = "Hello"
-idx = torch.tensor([encode(start)], dtype=torch.long)
-model.load_state_dict(
-    torch.load("gpt_best.pth", map_location="cpu")
-)
+    start = "Hello"
+    idx = torch.tensor([encode(start)], dtype=torch.long)
+    model.load_state_dict(
+        torch.load("gpt_best.pth", map_location="cpu")
+    )
 
-model.eval()
-out = model.generate(idx, 100,temperature=0.7)
-print(decode(out[0].tolist()))
+    model.eval()
+    out = model.generate(idx, 100,temperature=0.7)
+    print(decode(out[0].tolist()))
