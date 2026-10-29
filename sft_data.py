@@ -37,3 +37,15 @@ labels = torch.tensor(labels, dtype=torch.long)
 #         print("USER:", item["user"])
 #         print("EXPECTED:", item["assistant"])
 #         print("TRAINED TOKENS:", (labels[i] != -100).sum().item())
+batch_size = 8
+def get_batch(split):
+    if split=="train":
+         data=input_ids[:int(0.8*len(input_ids))]
+         target=labels[:int(0.8*len(labels))]
+    else:
+         data=input_ids[int(0.8*len(input_ids)):]
+         target=labels[int(0.8*len(labels)):]
+    ix = torch.randint(len(data), (batch_size,))
+    x = data[ix]
+    y = target[ix]
+    return x, y
