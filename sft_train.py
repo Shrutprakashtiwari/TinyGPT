@@ -2,16 +2,26 @@ import torch
 import torch.nn.functional as F
 import tiktoken
 
-from model import GPT, vocab_size, embed_size, num_heads, block_size
+from model import GPT, get_batch, vocab_size, embed_size, num_heads, block_size
 
 device = torch.device("cpu")
 enc = tiktoken.get_encoding("gpt2")
 @torch.no_grad()
-def estimate(loss):
+def estimate():
     model.eval()
     out={"train":0.0, "val":0.0}
-    
-
+    for split in ["train","val"]:
+        for k in range(100):
+            x,y=get_batch(split)
+            logits,_,_=model(x)
+            loss=F.cross_entropy(
+                logits[:,:-1,:].reshape(-1,vocab_size),
+                y[:,1:].reshape(-1),
+                ignore_index=-100)
+            out[split]+=loss.item()
+            out[split]/=100
+    return out
+        
 
 model = GPT(
     vocab_size=vocab_size,
