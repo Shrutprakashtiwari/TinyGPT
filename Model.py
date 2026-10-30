@@ -36,7 +36,7 @@ train_data = data[:int(0.9 * len(data))]
 val_data = data[int(0.9 * len(data)):]
 
 batch_size = 32
-block_size = 64
+block_size = 128
 embed_size = 128
 num_heads = 4
 head_size = embed_size // num_heads
@@ -82,7 +82,7 @@ class SelfAttention(nn.Module):
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, x, k_cache=None, v_cache=None):
+    def forward(self, x, k_cache=None, v_cache=None ,attention_mask=None):
         B, T, _ = x.shape
 
         qkv = self.qkv(x)
@@ -131,10 +131,15 @@ class SelfAttention(nn.Module):
         w = q_rot @ k_rot.transpose(-2, -1)
         w = w / math.sqrt(self.headsize)
         if k_cache is None:
-            mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
-            mask = ~mask
+            causal_mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
+            if attention_mask is not None:
+                padding_mask = attention_mask[:, None, None, :].bool()
+                combined_mask = causal_mask[None, None, :, :] & padding_mask
+            else:
+                combined_mask = causal_mask
+            # combined_mask=causal_mask& padding_mask
 
-            w = w.masked_fill(mask, float('-inf'))
+            w = w.masked_fill(~combined_mask, float('-inf'))
         w = w.softmax(dim=-1)
         w = self.dropout(w)
 
@@ -149,10 +154,11 @@ class MultiHeadAttention(nn.Module):
         ])
         self.proj=nn.Linear(num_heads*headsize, embed_size)
         self.dropout = nn.Dropout(0.1)
-    def forward(self, x, k_cache=None, v_cache=None):
+    def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
         k_cache_new=[]
         v_cache_new=[]
         out_heads=[]
+        # mask=attention_mask
         for i,head in enumerate(self.heads):
             if k_cache is not None and v_cache is not None:
                 k_c=k_cache[i]
@@ -160,7 +166,7 @@ class MultiHeadAttention(nn.Module):
             else:
                 k_c=None
                 v_c=None
-            out,k,v=head(x,k_c,v_c)
+            out,k,v=head(x,k_c,v_c, attention_mask=attention_mask)
             out_heads.append(out)
             k_cache_new.append(k)
             v_cache_new.append(v)
@@ -187,8 +193,8 @@ class TransformerBlock(nn.Module):
         self.ln1=RMSNorm(embed_size)
         self.ff=FeedForward(embed_size)
         self.ln2=RMSNorm(embed_size)
-    def forward(self, x, k_cache=None, v_cache=None):
-        attn_out, k, v = self.ma(self.ln1(x), k_cache, v_cache)
+    def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
+        attn_out, k, v = self.ma(self.ln1(x), k_cache, v_cache, attention_mask=attention_mask)
         x=x+attn_out
         x=x+self.ff(self.ln2(x))
         return x, k, v
@@ -210,7 +216,7 @@ class GPT(nn.Module):
         self.logits.weight = self.embed.weight
         self.block_size = block_size
 
-    def forward(self, x,k_cache=None,v_cache=None):
+    def forward(self, x,k_cache=None,v_cache=None, attention_mask=None):
         new_k_cache=[]
         new_v_cache=[]
 
@@ -220,7 +226,7 @@ class GPT(nn.Module):
         for i, block in enumerate(self.trans):
             k_c = k_cache[i] if k_cache is not None else None
             v_c = v_cache[i] if v_cache is not None else None
-            x, k, v = block(x, k_c, v_c)
+            x, k, v = block(x, k_c, v_c,attention_mask=attention_mask)
             new_k_cache.append(k)
             new_v_cache.append(v)
         x = self.ln3(x)
@@ -228,7 +234,17 @@ class GPT(nn.Module):
         logits=self.logits(x)
 
         return logits, new_k_cache, new_v_cache
-    def generate(self, idx, max_new_tokens, temperature=1.0):
+    def generate(
+        self,
+        idx,
+        max_new_tokens,
+        temperature=0.8,
+        eos_token_id=None,
+        top_k=40,
+        top_p=0.9,
+        repetition_penalty=1.1,
+        do_sample=True
+    ):
         self.eval()
 
         k_cache = None
@@ -237,36 +253,78 @@ class GPT(nn.Module):
         for _ in range(max_new_tokens):
 
             if k_cache is None:
-                idx_cond = idx
+                idx_cond = idx[:, -self.block_size:]
             else:
                 if k_cache[0][0].size(1) >= self.block_size:
-                    k_cache=None
-                    v_cache=None
+                    k_cache = None
+                    v_cache = None
                     idx_cond = idx[:, -self.block_size:]
                 else:
                     idx_cond = idx[:, -1:]
+
             with torch.no_grad():
-                logits, k_cache, v_cache = self(idx_cond, k_cache, v_cache)
+                logits, k_cache, v_cache = self(
+                    idx_cond, k_cache, v_cache
+                )
 
             logits = logits[:, -1, :]
-            probs = F.softmax(logits / temperature, dim=-1)
-            sorted_probs, sorted_indices = torch.sort(probs, descending=True)
-            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
 
-            mask = cumulative_probs > 0.9
-            mask[..., 1:] = mask[..., :-1].clone()
-            mask[..., 0] = False
+            # Repetition penalty
+            if repetition_penalty != 1.0:
+                for b in range(idx.shape[0]):
+                    previous_tokens = idx[b].unique()
+                    previous_logits = logits[b, previous_tokens]
 
-            sorted_probs[mask] = 0.0
-            sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)
+                    logits[b, previous_tokens] = torch.where(
+                        previous_logits < 0,
+                        previous_logits * repetition_penalty,
+                        previous_logits / repetition_penalty
+                    )
 
-            idx_next = torch.multinomial(sorted_probs, num_samples=1)
-            idx_next = torch.gather(sorted_indices, -1, idx_next)
+            # Greedy decoding
+            if not do_sample:
+                idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+
+            else:
+                # Temperature
+                logits = logits / max(temperature, 1e-5)
+
+                # Top-k filtering
+                if top_k is not None:
+                    k = min(top_k, logits.size(-1))
+                    threshold = torch.topk(logits, k, dim=-1).values[:, -1, None]
+                    logits = logits.masked_fill(logits < threshold, float('-inf'))
+
+                # Top-p filtering
+                if top_p is not None and top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(
+                        logits, descending=True, dim=-1
+                    )
+
+                    sorted_probs = F.softmax(sorted_logits, dim=-1)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                    sorted_mask = cumulative_probs > top_p
+                    sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+                    sorted_mask[..., 0] = False
+
+                    sorted_logits = sorted_logits.masked_fill(
+                        sorted_mask, float('-inf')
+                    )
+
+                    logits = torch.full_like(logits, float('-inf'))
+                    logits.scatter_(1, sorted_indices, sorted_logits)
+
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
 
             idx = torch.cat((idx, idx_next), dim=1)
 
-        return idx
+            if eos_token_id is not None:
+                if idx_next.shape[0] == 1 and idx_next.item() == eos_token_id:
+                    break
 
+        return idx
 
 
 model = GPT(
@@ -397,5 +455,14 @@ if __name__ == "__main__":
     )
 
     model.eval()
-    out = model.generate(idx, 100,temperature=0.7)
-    print(decode(out[0].tolist()))
+    output = model.generate(
+        idx,
+        max_new_tokens=150,
+        temperature=0.8,
+        top_k=40,
+        top_p=0.9,
+        repetition_penalty=1.1,
+        do_sample=True,
+        eos_token_id=enc.eot_token
+)
+    print(decode(output[0].tolist()))
