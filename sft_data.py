@@ -5,7 +5,7 @@ import math
 with open("dolly_conversations.json",encoding="utf-8") as f:
     conversations = json.load(f)
 # print(conversations)
-block_size=128
+block_size=32
 IGNORE_INDEX = -100
 
 labels = []
@@ -55,14 +55,14 @@ def get_batch(split):
          data=input_ids[int(0.8*len(input_ids)):]
          target=labels[int(0.8*len(labels)):]
          masks = attention_masks[int(0.8*len(attention_masks)):]
-    ix = torch.randint(len(data), (batch_size,))
+    ix = torch.randint(0,len(data), (batch_size,))
     x = data[ix]
     y = target[ix]
     mask=masks[ix]
+    print(x.shape)
+    
     return x, y,mask
 
 valid_examples = (labels != IGNORE_INDEX).any(dim=1)
-
-print("Total conversations:", len(labels))
-print("Conversations with assistant targets:", valid_examples.sum().item())
-print("Conversations with no assistant targets:", (~valid_examples).sum().item())
+# print("Conversations with assistant targets:", valid_examples.sum().item())
+# print("Conversations with no assistant targets:", (~valid_examples).sum().item())
