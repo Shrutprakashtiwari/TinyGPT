@@ -81,8 +81,9 @@ class SelfAttention(nn.Module):
         self.headsize = headsize
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
-
+        
     def forward(self, x, k_cache=None, v_cache=None ,attention_mask=None):
+        print("aa",x.shape)
         B, T, _ = x.shape
 
         qkv = self.qkv(x)
@@ -133,15 +134,15 @@ class SelfAttention(nn.Module):
         if k_cache is None:
             causal_mask = torch.tril(torch.ones(T, T_k, device=x.device)).bool()
             if attention_mask is not None:
-                padding_mask = attention_mask[:, None, None, :].bool()
-                combined_mask = causal_mask[None, None, :, :] & padding_mask
+                padding_mask = attention_mask[:, None, :].bool()
+                combined_mask = causal_mask[None, :, :] & padding_mask
             else:
                 combined_mask = causal_mask
             # combined_mask=causal_mask& padding_mask
 
             w = w.masked_fill(~combined_mask, float('-inf'))
         w = w.softmax(dim=-1)
-        w = self.dropout(w)
+        w = self.attn_dropout(w)
 
         out = w @ v
         return out,k,v
@@ -153,8 +154,9 @@ class MultiHeadAttention(nn.Module):
             for _ in range(num_heads)
         ])
         self.proj=nn.Linear(num_heads*headsize, embed_size)
-        self.dropout = nn.Dropout(0.1)
+        self.attn_dropout = nn.Dropout(0.1)
     def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
+        # print("M",x.shape)
         k_cache_new=[]
         v_cache_new=[]
         out_heads=[]
@@ -166,7 +168,7 @@ class MultiHeadAttention(nn.Module):
             else:
                 k_c=None
                 v_c=None
-            out,k,v=head(x,k_c,v_c, attention_mask=attention_mask)
+            out,k,v=head(x,k_cache=None,v_cache=None, attention_mask=attention_mask)
             out_heads.append(out)
             k_cache_new.append(k)
             v_cache_new.append(v)
@@ -194,9 +196,11 @@ class TransformerBlock(nn.Module):
         self.ff=FeedForward(embed_size)
         self.ln2=RMSNorm(embed_size)
     def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
-        attn_out, k, v = self.ma(self.ln1(x), k_cache, v_cache, attention_mask=attention_mask)
+        # print("T" ,x.shape)
+        attn_out, k, v = self.ma(self.ln1(x), k_cache=None, v_cache=None, attention_mask=attention_mask)
         x=x+attn_out
         x=x+self.ff(self.ln2(x))
+        # print("a", attn_out.shape)
         return x, k, v
 class GPT(nn.Module):
     def __init__(self, vocab_size, embed_size, num_heads, block_size, num_layers):
@@ -217,16 +221,19 @@ class GPT(nn.Module):
         self.block_size = block_size
 
     def forward(self, x,k_cache=None,v_cache=None, attention_mask=None):
+
         new_k_cache=[]
         new_v_cache=[]
-
+        print(x.shape)
         B, T = x.shape
 
         x=self.embed(x)
+        # print(x.shape,"G")
         for i, block in enumerate(self.trans):
             k_c = k_cache[i] if k_cache is not None else None
             v_c = v_cache[i] if v_cache is not None else None
-            x, k, v = block(x, k_c, v_c,attention_mask=attention_mask)
+            
+            x, k, v = block(x, k_cache=None, v_cache=None,attention_mask=attention_mask)
             new_k_cache.append(k)
             new_v_cache.append(v)
         x = self.ln3(x)
@@ -243,7 +250,8 @@ class GPT(nn.Module):
         top_k=40,
         top_p=0.9,
         repetition_penalty=1.1,
-        do_sample=True
+        do_sample=True,
+        attention_mask=None
     ):
         self.eval()
 
