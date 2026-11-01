@@ -180,35 +180,11 @@ Saved current progress and now I can resume it from that point whenever I want
 Added SFT 
 Added validation and get_batch in SFT
 Increased TinyGPT's context window from 64 to 128 tokens.
-
-
-
 Checked compatibility of the pretrained checkpoint with the larger context window.
-
-
-
 Added padding attention masks to prevent attention to padded tokens during SFT.
-
-
-
 Updated GPT.forward() to pass attention masks through Transformer blocks.
-
-
-
-Reviewed SFT data preprocessing, including prompt masking, response labels, and padding.
-
-
-
+Reviewed SFT data preprocessing, including prompt masking, response labels, and padding
 Reviewed the SFT training loop, validation loss, and best-checkpoint saving.
-
-
-
 Upgraded generation with temperature, top-k, top-p, repetition penalty, and greedy decoding.
-
-
-
 Discussed how to tokenize prompts, generate responses, and decode only the generated text.
-
-
-
 Studied gradient accumulation and its effective batch-size calculation.
