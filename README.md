@@ -183,6 +183,7 @@ Increased TinyGPT's context window from 64 to 128 tokens.
 Checked compatibility of the pretrained checkpoint with the larger context window.
 Added padding attention masks to prevent attention to padded tokens during SFT.
 Updated GPT.forward() to pass attention masks through Transformer blocks.
+Ran it and checked it
 Reviewed SFT data preprocessing, including prompt masking, response labels, and padding
 Reviewed the SFT training loop, validation loss, and best-checkpoint saving.
 Upgraded generation with temperature, top-k, top-p, repetition penalty, and greedy decoding.
