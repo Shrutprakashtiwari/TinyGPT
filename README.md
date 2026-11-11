@@ -189,3 +189,4 @@ Reviewed the SFT training loop, validation loss, and best-checkpoint saving.
 Upgraded generation with temperature, top-k, top-p, repetition penalty, and greedy decoding.
 Discussed how to tokenize prompts, generate responses, and decode only the generated text.
 Studied gradient accumulation and its effective batch-size calculation.
+Reviewed the code
