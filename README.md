@@ -190,3 +190,4 @@ Upgraded generation with temperature, top-k, top-p, repetition penalty, and gree
 Discussed how to tokenize prompts, generate responses, and decode only the generated text.
 Studied gradient accumulation and its effective batch-size calculation.
 Reviewed the code
+Started LoRA optimization
