@@ -81,9 +81,11 @@ class SelfAttention(nn.Module):
         self.headsize = headsize
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
+        self.loraA=nn.Parameter(torch.randn(8,128))
+        self.loraB=nn.Parameter(torch.zeros(128,8))
         
     def forward(self, x, k_cache=None, v_cache=None ,attention_mask=None):
-        print("aa",x.shape)
+        # print("aa",x.shape)
         B, T, _ = x.shape
 
         qkv = self.qkv(x)
