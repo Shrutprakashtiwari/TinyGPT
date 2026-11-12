@@ -191,3 +191,4 @@ Discussed how to tokenize prompts, generate responses, and decode only the gener
 Studied gradient accumulation and its effective batch-size calculation.
 Reviewed the code
 Started LoRA optimization
+Added Lora matrices
