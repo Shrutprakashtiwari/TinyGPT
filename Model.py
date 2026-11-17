@@ -77,20 +77,30 @@ class RMSNorm(nn.Module):
 class SelfAttention(nn.Module):
     def __init__(self, embed_size, headsize,block_size):
         super().__init__()
-        self.qkv = nn.Linear(embed_size, 3 * headsize)
+        self.q = nn.Linear(embed_size, headsize)
+        self.k = nn.Linear(embed_size, headsize)
+        self.v = nn.Linear(embed_size, headsize)
         self.headsize = headsize
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
-        self.loraA=nn.Parameter(torch.randn(8,128),bias=False)
-        self.loraB=nn.Parameter(torch.zeros(128,8),bias=False)
+        self.qloraA=nn.Parameter(torch.randn(8,embed_size))
+        self.kloraA=nn.Parameter(torch.randn(8,embed_size))
+        self.vloraA=nn.Parameter(torch.randn(8,embed_size))
+        self.qloraB=nn.Parameter(torch.zeros(headsize,8))
+        self.kloraB=nn.Parameter(torch.zeros(headsize,8))
+        self.vloraB=nn.Parameter(torch.zeros(headsize,8))
         
     def forward(self, x, k_cache=None, v_cache=None ,attention_mask=None):
         # print("aa",x.shape)
         B, T, _ = x.shape
 
-        qkv = self.qkv(x)
-        q, k_new, v_new = qkv.split(self.headsize, dim=-1)
+        q = self.q(x)
+        k_new = self.k(x)
+        v_new = self.v(x)
 
+        q=q+ 16/8(x@self.qloraA.T @ self.qloraB.T)
+        k_new=k_new+ 16/8(x@self.kloraA.T @ self.kloraB.T)
+        v_new=v_new+ 16/8(x@self.vloraA.T @ self.vloraB.T)
         if k_cache is not None and v_cache is not None:
             k=torch.cat([k_cache, k_new], dim=1)
             v=torch.cat([v_cache, v_new], dim=1)
