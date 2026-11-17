@@ -83,9 +83,9 @@ class SelfAttention(nn.Module):
         self.headsize = headsize
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
-        self.qloraA = nn.Parameter(torch.empty(rank, embed_size))
-        self.kloraA = nn.Parameter(torch.empty(rank, embed_size))
-        self.vloraA = nn.Parameter(torch.empty(rank, embed_size))
+        self.qloraA = nn.Parameter(torch.empty(8, embed_size))
+        self.kloraA = nn.Parameter(torch.empty(8, embed_size))
+        self.vloraA = nn.Parameter(torch.empty(8, embed_size))
 
         nn.init.kaiming_uniform_(self.qloraA, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.kloraA, a=math.sqrt(5))
