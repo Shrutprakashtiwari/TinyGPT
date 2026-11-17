@@ -193,3 +193,4 @@ Reviewed the code
 Started LoRA optimization
 Added Lora matrices
 Optimized matrices
+Done with implementing LoRA
