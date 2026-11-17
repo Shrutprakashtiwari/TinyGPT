@@ -83,9 +83,13 @@ class SelfAttention(nn.Module):
         self.headsize = headsize
         self.block_size = block_size
         self.dropout = nn.Dropout(0.1)
-        self.qloraA=nn.Parameter(torch.randn(8,embed_size))
-        self.kloraA=nn.Parameter(torch.randn(8,embed_size))
-        self.vloraA=nn.Parameter(torch.randn(8,embed_size))
+        self.qloraA = nn.Parameter(torch.empty(rank, embed_size))
+        self.kloraA = nn.Parameter(torch.empty(rank, embed_size))
+        self.vloraA = nn.Parameter(torch.empty(rank, embed_size))
+
+        nn.init.kaiming_uniform_(self.qloraA, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.kloraA, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.vloraA, a=math.sqrt(5))
         self.qloraB=nn.Parameter(torch.zeros(headsize,8))
         self.kloraB=nn.Parameter(torch.zeros(headsize,8))
         self.vloraB=nn.Parameter(torch.zeros(headsize,8))
@@ -167,6 +171,9 @@ class MultiHeadAttention(nn.Module):
         ])
         self.proj=nn.Linear(num_heads*headsize, embed_size)
         self.attn_dropout = nn.Dropout(0.1)
+        self.oloraA=nn.Parameter(torch.empty(8, embed_size))
+        nn.init.kaiming_uniform_(self.oloraA, a=math.sqrt(5))
+        self.oloraB=nn.Parameter(torch.zeros(embed_size,8))
     def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
         # print("M",x.shape)
         k_cache_new=[]
@@ -180,12 +187,15 @@ class MultiHeadAttention(nn.Module):
             else:
                 k_c=None
                 v_c=None
-            out,k,v=head(x,k_cache=None,v_cache=None, attention_mask=attention_mask)
+            out,k,v=head(x,k_cache=k_c,v_cache=v_c, attention_mask=attention_mask)
             out_heads.append(out)
             k_cache_new.append(k)
             v_cache_new.append(v)
         res=torch.cat(out_heads, dim=-1)
-        return self.dropout(self.proj(res)),k_cache_new,v_cache_new
+        out=self.proj(res)
+        out=out+ 16/8(res@ self.oloraA.T @ self.oloraB.T)
+
+        return self.dropout(out),k_cache_new,v_cache_new
 class FeedForward(nn.Module):
     def __init__(self,embed_size):
         super().__init__()
@@ -209,7 +219,7 @@ class TransformerBlock(nn.Module):
         self.ln2=RMSNorm(embed_size)
     def forward(self, x, k_cache=None, v_cache=None, attention_mask=None):
         # print("T" ,x.shape)
-        attn_out, k, v = self.ma(self.ln1(x), k_cache=None, v_cache=None, attention_mask=attention_mask)
+        attn_out, k, v = self.ma(self.ln1(x), k_cache=k_cache, v_cache=v_cache, attention_mask=attention_mask)
         x=x+attn_out
         x=x+self.ff(self.ln2(x))
         # print("a", attn_out.shape)
@@ -245,7 +255,7 @@ class GPT(nn.Module):
             k_c = k_cache[i] if k_cache is not None else None
             v_c = v_cache[i] if v_cache is not None else None
             
-            x, k, v = block(x, k_cache=None, v_cache=None,attention_mask=attention_mask)
+            x, k, v = block(x, k_cache=k_c, v_cache=v_c,attention_mask=attention_mask)
             new_k_cache.append(k)
             new_v_cache.append(v)
         x = self.ln3(x)
