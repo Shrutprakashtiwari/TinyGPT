@@ -195,3 +195,4 @@ Added Lora matrices
 Optimized matrices
 Done with implementing LoRA
 Completed QLoRA, DoRA, AdaLoRA
+Started DPO
