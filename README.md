@@ -198,3 +198,4 @@ Completed QLoRA, DoRA, AdaLoRA
 Started DPO
 Started DPO implementation
 Downloaded DPO dataset of Hugging face
+Preprocessed data and added get_log_probabs function for calculating the probabilities
