@@ -433,6 +433,7 @@ if __name__ == "__main__":
     # ):
 
         logits,_,_ = model(x)
+        #i used separate training loops for model, sft and dpo
             # print("logits:", logits.min().item(), logits.max().item(), logits.mean().item())
 
         loss = F.cross_entropy(
