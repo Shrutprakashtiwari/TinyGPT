@@ -2,7 +2,7 @@ import copy
 from model import GPT
 import torch
 import torch.nn.functional as F
-from preprocess import train_loader,preprocess,collate_fn
+from preprocess import train_loader,preprocess,collate_fn,test_loader
 policy_model= GPT()
 checkpoint= torch.load(
     "gpt_sft.pth",
@@ -82,7 +82,7 @@ epochs=3
 max_grad_norm=1.0
 optimizer=optim.AdamW(policy_model.parameters(), lr=learning_rate, weight_decay=0.01)
 for epoch in range(epochs):
-    policy_model.train()
+    policy_model.eval()
     reference_model.eval()
     total_loss=0.0
     for batch in train_loader:
@@ -106,4 +106,108 @@ for epoch in range(epochs):
     torch.save(
         policy_model.state_dict(),
         "gpt_dpo.pth")
-    
+
+def evaluate_dpo():
+
+    policy_model.eval()
+    reference_model.eval()
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+
+        for batch in test_loader:
+
+            batch = {
+                key: value.to(device)
+                for key, value in batch.items()
+            }
+
+            (
+                policy_chosen_logps,
+                policy_rejected_logps,
+                reference_chosen_logps,
+                reference_rejected_logps
+            ) = compute_dpo_log_probs(batch)
+
+            # Calculate DPO logits
+            chosen_logratios = (
+                policy_chosen_logps - reference_chosen_logps
+            )
+
+            rejected_logratios = (
+                policy_rejected_logps - reference_rejected_logps
+            )
+
+            logits = beta * (
+                chosen_logratios - rejected_logratios
+            )
+
+            # DPO loss
+            loss = -F.logsigmoid(logits).mean()
+
+            total_loss += loss.item()
+
+            # Preference accuracy
+            correct += (logits > 0).sum().item()
+            total += logits.numel()
+
+    return {
+        "loss": total_loss / len(test_loader),
+        "accuracy": correct / total
+    }
+
+best_val_loss = float("inf")
+
+for epoch in range(epochs):
+
+    policy_model.train()
+    reference_model.eval()
+
+    total_loss = 0.0
+
+    for batch in train_loader:
+
+        batch = {
+            key: value.to(device)
+            for key, value in batch.items()
+        }
+
+        optimizer.zero_grad(set_to_none=True)
+
+        logps = compute_dpo_log_probs(batch)
+
+        loss = dpo_loss(*logps)
+
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(
+            policy_model.parameters(),
+            1.0
+        )
+
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    train_loss = total_loss / len(train_loader)
+    val_loss = evaluate_dpo()
+
+    print(
+        f"Epoch {epoch + 1}/{epochs} | "
+        f"Train Loss: {train_loss:.4f} | "
+        f"Validation Loss: {val_loss:.4f}"
+    )
+
+    if val_loss < best_val_loss:
+
+        best_val_loss = val_loss
+
+        torch.save(
+            policy_model.state_dict(),
+            "gpt_dpo_best.pth"
+        )
+
+        print("Best DPO checkpoint saved!")
