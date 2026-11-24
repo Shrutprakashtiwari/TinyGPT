@@ -108,13 +108,3 @@ test_loader = DataLoader(
     shuffle=True,
     collate_fn=collate_fn
 )
-def get_log_probabs(model, input_ids,response_mask, attention_mask):
-    logits, _,_=model(input_ids, attention_mask=attention_mask)
-    logits=logits[:, :-1, :]
-    targets=input_ids[:, 1:]
-    response_mask=response_mask[:, 1:]
-    log_probabs=F.log_softmax(logits, dim=-1)
-    token_log_probs=log_probabs.gather(log_probabs, dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
-    token_log_probs=response_mask*token_log_probs
-    sequence_log_probs=token_log_probs.sum(dim=-1)
-    return sequence_log_probs
