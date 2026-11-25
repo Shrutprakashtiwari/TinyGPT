@@ -201,3 +201,4 @@ Downloaded DPO dataset of Hugging face
 Preprocessed data and added get_log_probabs function for calculating the probabilities
 Made two copies of policy and reference models
 Implemented loss function
+DPO implemented
